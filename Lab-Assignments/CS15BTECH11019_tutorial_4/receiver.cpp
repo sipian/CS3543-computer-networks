@@ -20,7 +20,7 @@
 #include <cstring>
 #include <iostream>
 #include <fstream>
-
+#include <vector>
 #define PAYLOADSIZE 1046
 using namespace std;
 
@@ -81,43 +81,9 @@ void sendUDPACK(int sockfd, segmentHeader* ack, struct sockaddr* senderAddr) {
 
 int expectedseqnum = 0;
 
-segment* recvSegment(int sockfd) {
-	segmentHeader* ack = new segmentHeader;
-	segment* packet = new segment;
-
-	ack->sequenceNo = 0;
-	ack->checksum = 0;
-	ack->lastPacket = true;
-
-	struct sockaddr senderAddr;
-	socklen_t serverlen =  sizeof(senderAddr);
-
-	while (true) {
-		if (recvfrom(sockfd, packet, sizeof(*packet), 0, &senderAddr, &serverlen) < 0) {
-			cout << "Error in receiving UDP segment \tReason " << std::strerror(errno) << endl;
-		}
-		else if (! checksum(&packet->header, packet->payload)) {
-			cout << "Incorrect Checksum for UDP segment " << endl;
-		}
-		else if (packet->header.sequenceNo != expectedseqnum) {
-			// dup ACK
-			cout << "Error: Incorrect segment number for UDP segment " << endl;
-			ack->ackNo = expectedseqnum;
-			sendUDPACK(sockfd, ack, &senderAddr);
-		}
-		else {
-			ack->ackNo = expectedseqnum;
-			sendUDPACK(sockfd, ack, &senderAddr);
-			expectedseqnum++;
-			return packet;
-		}
-	}
-}
-
 int main(int argc, char **argv) {
 	int sockfd, sender_port , recv_port;
 	struct sockaddr_in recvAddr;
-
 
 	/* check command line arguments */
 	if (argc != 4) {
@@ -147,21 +113,40 @@ int main(int argc, char **argv) {
 
 	ofstream fout;
 	fout.open(argv[3], ios::binary | ios::out);
-	segment* packet;
 	// int total = 0;
 
+	segmentHeader* ack = new segmentHeader;
+	segment* packet = new segment;
+	struct sockaddr senderAddr;
+	socklen_t serverlen =  sizeof(senderAddr);
+
 	while (true) {
-		packet = recvSegment(sockfd);
-		// total++;
-		int len = packet->header.length;
-		for (int i = 0; i < len; i++)
-		{
-			fout << packet->payload[i];
+		if (recvfrom(sockfd, packet, sizeof(*packet), 0, &senderAddr, &serverlen) < 0) {
+			cout << "Error in receiving UDP segment \tReason " << std::strerror(errno) << endl;
 		}
-		if (packet->header.lastPacket) {
-			break;
+		else if ((!checksum(&packet->header, packet->payload)) || (packet->header.sequenceNo != expectedseqnum)) {
+			// dup ACK
+			cout << "Error: Incorrect segment number for UDP segment " << packet->header.sequenceNo << " , expected " << expectedseqnum << endl;
+			ack->ackNo = expectedseqnum;
+			sendUDPACK(sockfd, ack, &senderAddr);
+		}
+		else {
+			cout << "Correct segment number for UDP segment " << packet->header.sequenceNo << " :: " << endl;
+			ack->ackNo = expectedseqnum;
+			expectedseqnum++;
+			sendUDPACK(sockfd, ack, &senderAddr);
+
+			int len = packet->header.length;
+			for (int i = 0; i < len; i++)
+			{
+				fout << packet->payload[i];
+			}
+			if (packet->header.lastPacket) {
+				break;
+			}
 		}
 	}
 	close(sockfd);
+
 	return 0;
 }

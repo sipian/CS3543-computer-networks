@@ -25,6 +25,7 @@
 #include <chrono>
 #include <vector>
 #include <thread>
+#include <mutex>
 
 #define PAYLOADSIZE 1046
 using namespace std;
@@ -67,6 +68,7 @@ int nextseqnum = 0;
 int windowSize = 10;
 std::vector<segment* > file_data;
 int n_packets = 0;
+std::mutex mtx;           // mutex for critical section
 
 int findchecksum(const segmentHeader* packet, const char* payload = NULL) {
 	int checksum = 0;
@@ -97,8 +99,12 @@ void rdt_rcv(int sockfd, struct sockaddr* destAddr) {
 	while (1) {
 		if (recvfrom(sockfd, ack, sizeof(*ack), 0, &senderAddr, &senderLen) < 0) {
 			// timeout
-			for (int i = base; i <= nextseqnum - 1; i++) {
-				packet = file_data[nextseqnum];
+			int base_local = base;
+			int nextseqnum_local = nextseqnum;
+			cout << "Failed Transmission - base " << base_local << " - nextseqnum " << nextseqnum_local << endl;
+			for (int i = base_local; i < nextseqnum_local ; i++) {
+				packet = file_data[i];
+				cout << "-- sending " << packet->header.sequenceNo << endl;
 				if (sendto(sockfd, packet, sizeof(*packet), 0, destAddr, sizeof(*destAddr)) < 0) {
 					cout << "Error in sending UDP frame\tReason :: " << std::strerror(errno) << endl;
 				}
@@ -108,8 +114,10 @@ void rdt_rcv(int sockfd, struct sockaddr* destAddr) {
 			cout << "Incorrect Checksum for UDP segment " << endl;
 		}
 		else {
-			base = ack->ackNo + 1;
-			if (base == n_packets) {
+			cout << "++ received " << ack->ackNo << endl;
+			base = ack->ackNo;
+			//cout << "** received " << base << " -- " << file_data[base]->header.sequenceNo  << endl;
+			if (base >= (n_packets-1)) {
 				break;
 			}
 		}
@@ -138,7 +146,7 @@ int main(int argc, char **argv) {
 
 	struct timeval tv;
 	tv.tv_sec = 0;
-	tv.tv_usec = 50000;
+	tv.tv_usec = 100000;
 	if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
 		cout << "Error in creating timeout for UDP connection " << endl;
 		return 0;
@@ -169,7 +177,6 @@ int main(int argc, char **argv) {
 	ifstream fin;
 	fin.open(argv[3], ios::binary | ios::in);
 
-
 	std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
 
 	// save data
@@ -191,24 +198,26 @@ int main(int argc, char **argv) {
 			packet->header.length = PAYLOADSIZE;
 		}
 		packet->header.checksum = findchecksum(&packet->header, packet->payload);
-		counter++;
 		file_data.push_back(packet);
 	}
 
 	n_packets = file_data.size();
+	cout << "READ full file " << n_packets << endl;
 	segment* packet;
 	struct sockaddr* destAddr = (struct sockaddr*) (&recvAddr);
 	thread recv_thread = thread(rdt_rcv, sockfd, destAddr);
-
-	while (true) {
-		if (nextseqnum < base + windowSize) {
+	while (base < n_packets-1) {
+		if (nextseqnum < base + windowSize && nextseqnum < n_packets) {
 			packet = file_data[nextseqnum];
+			cout << "-- sending " << packet->header.sequenceNo << endl;
 			if (sendto(sockfd, packet, sizeof(*packet), 0, destAddr, sizeof(*destAddr)) < 0) {
 				cout << "Error in sending UDP frame\tReason :: " << std::strerror(errno) << endl;
 			}
 			nextseqnum++;
 		}
 	}
+
+	recv_thread.join();
 
 	std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 	std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << std::endl;
