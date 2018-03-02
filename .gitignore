@@ -36,3 +36,6 @@ client
 server
 sender
 receiver
+
+
+*.pcap

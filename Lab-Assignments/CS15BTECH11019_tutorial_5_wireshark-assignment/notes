@@ -1,0 +1,14 @@
+DNS is UDP - udp.port == 53 || tcp.port == 53
+
+ip + port
+
+ip.addr ip.src ip.dst
+
+ip.srcport ip.dstport
+
+ip.addr == 192.168.42.123 && (tcp.port == 53 || udp.port == 53 )
+
+
+GeoIP tell which country IP belongs to
+
+https://www.wireshark.org/lists/wireshark-users/201111/msg00020.html
