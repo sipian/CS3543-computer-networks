@@ -38,4 +38,7 @@ sender
 receiver
 
 
-*.pcap
+*.
+
+project/
+course-slides/
